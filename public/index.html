@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MyHome Video Brander</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .card { background: #1e293b; border-radius: 16px; padding: 40px; width: 100%; max-width: 520px; box-shadow: 0 25px 50px rgba(0,0,0,0.4); }
+    h1 { font-size: 24px; font-weight: 700; margin-bottom: 6px; color: #f97316; }
+    .sub { font-size: 14px; color: #94a3b8; margin-bottom: 32px; }
+    label { display: block; font-size: 13px; font-weight: 600; color: #94a3b8; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+    input[type=text], input[type=url] { width: 100%; background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 12px 14px; color: #f1f5f9; font-size: 15px; margin-bottom: 20px; outline: none; transition: border-color 0.2s; }
+    input:focus { border-color: #f97316; }
+    .upload-zone { border: 2px dashed #334155; border-radius: 12px; padding: 32px; text-align: center; cursor: pointer; margin-bottom: 20px; transition: all 0.2s; }
+    .upload-zone:hover, .upload-zone.active { border-color: #f97316; background: rgba(249,115,22,0.05); }
+    .upload-zone p { font-size: 14px; color: #64748b; margin-top: 8px; }
+    .upload-zone .icon { font-size: 36px; }
+    #logo-preview { max-width: 160px; max-height: 80px; margin: 12px auto 0; display: none; border-radius: 8px; background: white; padding: 8px; }
+    button { width: 100%; background: #f97316; color: white; border: none; border-radius: 10px; padding: 14px; font-size: 16px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    button:hover:not(:disabled) { background: #ea6c0a; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status { margin-top: 24px; padding: 20px; background: #0f172a; border-radius: 10px; display: none; }
+    .status.visible { display: block; }
+    .status-label { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; }
+    .status-label.processing { color: #f59e0b; }
+    .status-label.done { color: #22c55e; }
+    .status-label.error { color: #ef4444; }
+    .progress-bar { height: 4px; background: #1e293b; border-radius: 2px; margin: 12px 0; overflow: hidden; }
+    .progress-fill { height: 100%; background: #f97316; border-radius: 2px; width: 0; transition: width 0.3s; animation: pulse 1.5s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .dl-btn { display: inline-block; background: #22c55e; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; margin-top: 12px; font-size: 15px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🎬 MyHome Video Brander</h1>
+    <p class="sub">Upload an agent logo and details to generate a branded MyHome video.</p>
+
+    <label>Agent Name</label>
+    <input type="text" id="agentName" placeholder="e.g. Kelvin Francis" />
+
+    <label>Agent Website URL (for QR code)</label>
+    <input type="url" id="agentUrl" placeholder="e.g. https://kelvinfrancis.com" />
+
+    <label>Agent Logo</label>
+    <div class="upload-zone" id="uploadZone">
+      <div class="icon">🏠</div>
+      <p>Click to upload logo (PNG or SVG, transparent background ideal)</p>
+      <img id="logo-preview" />
+    </div>
+    <input type="file" id="logoInput" accept="image/*" style="display:none" />
+
+    <button id="generateBtn" disabled>Generate Branded Video →</button>
+
+    <div class="status" id="statusBox">
+      <div class="status-label" id="statusLabel">Processing...</div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:30%"></div></div>
+      <div id="statusMsg" style="font-size:13px;color:#64748b;margin-top:4px;">Generating voiceover and rendering video — takes about 2 minutes.</div>
+    </div>
+  </div>
+
+  <script>
+    const agentName = document.getElementById('agentName');
+    const agentUrl = document.getElementById('agentUrl');
+    const logoInput = document.getElementById('logoInput');
+    const uploadZone = document.getElementById('uploadZone');
+    const logoPreview = document.getElementById('logo-preview');
+    const generateBtn = document.getElementById('generateBtn');
+    const statusBox = document.getElementById('statusBox');
+    const statusLabel = document.getElementById('statusLabel');
+    const progressFill = document.getElementById('progressFill');
+    const statusMsg = document.getElementById('statusMsg');
+    let logoFile = null;
+
+    uploadZone.addEventListener('click', () => logoInput.click());
+    logoInput.addEventListener('change', e => {
+      logoFile = e.target.files[0];
+      if (logoFile) {
+        const reader = new FileReader();
+        reader.onload = ev => { logoPreview.src = ev.target.result; logoPreview.style.display = 'block'; };
+        reader.readAsDataURL(logoFile);
+        checkReady();
+      }
+    });
+    agentName.addEventListener('input', checkReady);
+    agentUrl.addEventListener('input', checkReady);
+
+    function checkReady() {
+      generateBtn.disabled = !(agentName.value.trim() && agentUrl.value.trim() && logoFile);
+    }
+
+    generateBtn.addEventListener('click', async () => {
+      generateBtn.disabled = true;
+      statusBox.className = 'status visible';
+      statusLabel.className = 'status-label processing';
+      statusLabel.textContent = 'Processing...';
+      progressFill.style.width = '15%';
+      statusMsg.textContent = 'Generating voiceover and rendering video — takes about 2 minutes.';
+
+      const fd = new FormData();
+      fd.append('logo', logoFile);
+      fd.append('agentName', agentName.value.trim());
+      fd.append('agentUrl', agentUrl.value.trim());
+
+      const resp = await fetch('/brand', { method: 'POST', body: fd });
+      const { jobId, error } = await resp.json();
+      if (error) { showError(error); return; }
+
+      progressFill.style.width = '40%';
+      poll(jobId);
+    });
+
+    function poll(jobId) {
+      const interval = setInterval(async () => {
+        const resp = await fetch(`/status/${jobId}`);
+        const job = await resp.json();
+        if (job.status === 'done') {
+          clearInterval(interval);
+          progressFill.style.width = '100%';
+          progressFill.style.animation = 'none';
+          statusLabel.className = 'status-label done';
+          statusLabel.textContent = '✅ Done!';
+          statusMsg.innerHTML = `<a class="dl-btn" href="/download/${jobId}" download>⬇️ Download ${agentName.value.trim()} Video</a>`;
+          generateBtn.disabled = false;
+        } else if (job.status === 'error') {
+          clearInterval(interval);
+          showError(job.error);
+        } else {
+          progressFill.style.width = '70%';
+        }
+      }, 3000);
+    }
+
+    function showError(msg) {
+      statusLabel.className = 'status-label error';
+      statusLabel.textContent = '❌ Error';
+      statusMsg.textContent = msg;
+      generateBtn.disabled = false;
+    }
+  </script>
+</body>
+</html>
