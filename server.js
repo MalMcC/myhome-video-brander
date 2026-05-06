@@ -7,6 +7,7 @@ const { buildVideo } = require('./pipeline');
 
 const app = express();
 const PORT = process.env.PORT || 3456;
+console.log(`[Server] Starting on PORT=${PORT}`);
 
 const upload = multer({
   dest: path.join(__dirname, 'uploads'),
