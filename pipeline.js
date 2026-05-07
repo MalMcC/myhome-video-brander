@@ -44,8 +44,10 @@ function deriveVipSlug(agentUrl) {
 
 async function makeTextPng(text, outPath, { fontSize = 40, color = 'white', fontFamily = 'Helvetica, Arial, sans-serif', fontWeight = 'normal', width, height = 120 } = {}) {
   const w = width || Math.max(500, text.length * fontSize * 0.65);
+  // Escape fontFamily for safe SVG attribute embedding (replace double quotes with single)
+  const safeFontFamily = fontFamily.replace(/"/g, "'");
   const svg = `<svg width="${w}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-    <text x="${w/2}" y="${height/2}" font-family="${fontFamily}" font-weight="${fontWeight}" font-size="${fontSize}" fill="${color}" text-anchor="middle" dominant-baseline="middle">${text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</text>
+    <text x="${w/2}" y="${height/2}" font-family="${safeFontFamily}" font-weight="${fontWeight}" font-size="${fontSize}" fill="${color}" text-anchor="middle" dominant-baseline="middle">${text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</text>
   </svg>`;
   await sharp(Buffer.from(svg)).png().toFile(outPath);
   return { width: w, height };
