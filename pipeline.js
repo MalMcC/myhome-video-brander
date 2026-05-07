@@ -17,7 +17,7 @@ const VARIANTS = {
     logoCentreOut: [4,   8],   // 04:08
     logoTrIn:      [4,  19],   // 04:19
     qrIn:          [53,  7],   // 53:07
-    thumbTime:     12 + 4/24,  // 12:04
+    thumbTime:     9 + 14/24,  // 09:14
   },
   urban: {
     file: 'myhome-urban-raw.mp4',
@@ -26,7 +26,7 @@ const VARIANTS = {
     logoCentreOut: [3,  18],   // 03:18
     logoTrIn:      [5,   8],   // 05:08
     qrIn:          [54,  7],   // 54:07
-    thumbTime:     9 + 14/24,  // 09:14
+    thumbTime:     12 + 4/24,  // 12:04
   }
 };
 
