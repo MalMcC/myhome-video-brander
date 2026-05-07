@@ -11,16 +11,13 @@ console.log(`[Server] Starting on PORT=${PORT}`);
 
 const upload = multer({
   dest: path.join(__dirname, 'uploads'),
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB logo limit
+  limits: { fileSize: 10 * 1024 * 1024 }
 });
 
-// Serve static UI
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Job status store (in-memory for now)
 const jobs = {};
 
-// POST /brand — kick off a branding job
 app.post('/brand', upload.single('logo'), async (req, res) => {
   const { agentName, agentUrl } = req.body;
   if (!req.file || !agentName || !agentUrl) {
@@ -31,22 +28,30 @@ app.post('/brand', upload.single('logo'), async (req, res) => {
   const jobDir = path.join(__dirname, 'uploads', jobId);
   fs.mkdirSync(jobDir, { recursive: true });
 
-  // Move logo into job dir
   const logoExt = path.extname(req.file.originalname) || '.png';
   const logoPath = path.join(jobDir, `logo${logoExt}`);
   fs.renameSync(req.file.path, logoPath);
 
-  const outputPath = path.join(__dirname, 'output', `myhome-${jobId}.mp4`);
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  const outputDir = path.join(__dirname, 'output');
+  fs.mkdirSync(outputDir, { recursive: true });
 
   jobs[jobId] = { status: 'processing', agentName, agentUrl, createdAt: new Date().toISOString() };
   res.json({ jobId, status: 'processing', pollUrl: `/status/${jobId}` });
 
-  // Run pipeline async
-  buildVideo({ logoPath, agentName, agentUrl, outputPath, jobDir })
-    .then(() => {
+  buildVideo({ logoPath, agentName, agentUrl, outputDir, jobDir })
+    .then(results => {
       jobs[jobId].status = 'done';
-      jobs[jobId].downloadUrl = `/download/${jobId}`;
+      jobs[jobId].variants = {
+        rural: {
+          downloadUrl: `/download/${jobId}/rural`,
+          thumbUrl: `/thumb/${jobId}/rural`
+        },
+        urban: {
+          downloadUrl: `/download/${jobId}/urban`,
+          thumbUrl: `/thumb/${jobId}/urban`
+        }
+      };
+      jobs[jobId]._results = results;
     })
     .catch(err => {
       console.error(`[Job ${jobId}] Error:`, err.message);
@@ -55,19 +60,31 @@ app.post('/brand', upload.single('logo'), async (req, res) => {
     });
 });
 
-// GET /status/:jobId
 app.get('/status/:jobId', (req, res) => {
   const job = jobs[req.params.jobId];
   if (!job) return res.status(404).json({ error: 'Job not found' });
-  res.json(job);
+  // Return public fields only
+  const { status, agentName, agentUrl, createdAt, variants, error } = job;
+  res.json({ status, agentName, agentUrl, createdAt, variants, error });
 });
 
-// GET /download/:jobId
-app.get('/download/:jobId', (req, res) => {
+app.get('/download/:jobId/:variant', (req, res) => {
   const job = jobs[req.params.jobId];
+  const variant = req.params.variant;
   if (!job || job.status !== 'done') return res.status(404).json({ error: 'Not ready' });
-  const filePath = path.join(__dirname, 'output', `myhome-${req.params.jobId}.mp4`);
-  res.download(filePath, `myhome-${job.agentName.replace(/\s+/g, '-')}.mp4`);
+  const result = job._results?.[variant];
+  if (!result) return res.status(404).json({ error: 'Variant not found' });
+  const agentSlug = job.agentName.replace(/\s+/g, '-');
+  res.download(result.outputPath, `myhome-${variant}-${agentSlug}.mp4`);
+});
+
+app.get('/thumb/:jobId/:variant', (req, res) => {
+  const job = jobs[req.params.jobId];
+  const variant = req.params.variant;
+  if (!job || job.status !== 'done') return res.status(404).json({ error: 'Not ready' });
+  const result = job._results?.[variant];
+  if (!result || !fs.existsSync(result.thumbPath)) return res.status(404).json({ error: 'Thumbnail not found' });
+  res.sendFile(result.thumbPath);
 });
 
 app.listen(PORT, () => console.log(`🎬 Video Brander running on http://localhost:${PORT}`));
