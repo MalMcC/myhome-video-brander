@@ -90,7 +90,8 @@ async function buildVideo({ logoPath, agentName, agentUrl, outputPath, jobDir })
   console.log('[1/3] Building overlays...');
 
   // --- QR code: ~3cm wide. At 96dpi: 3cm = ~113px. Use 120px to be safe.
-  const QR_SIZE = Math.round(VW * 0.14); // ~14% of width = 119px at 848w, scannable
+  // 5cm x 5cm: at 96dpi on a 1080p frame, 5cm = 189px = 17.5% of VH
+  const QR_SIZE = Math.round(VH * 0.175);
   await QRCode.toFile(qrPath, vipQrUrl, {
     width: QR_SIZE, margin: 2,
     color: { dark: '#000000', light: '#ffffff' }
