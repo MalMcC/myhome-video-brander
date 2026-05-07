@@ -42,11 +42,10 @@ function deriveVipSlug(agentUrl) {
   }
 }
 
-async function makeTextPng(text, outPath, { fontSize = 40, color = 'white', width, height = 120 } = {}) {
-  // Auto-size width to text if not specified
+async function makeTextPng(text, outPath, { fontSize = 40, color = 'white', fontFamily = 'Helvetica, Arial, sans-serif', fontWeight = 'normal', width, height = 120 } = {}) {
   const w = width || Math.max(500, text.length * fontSize * 0.65);
   const svg = `<svg width="${w}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-    <text x="${w/2}" y="${height/2}" font-family="Helvetica, Arial, sans-serif" font-size="${fontSize}" fill="${color}" text-anchor="middle" dominant-baseline="middle">${text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</text>
+    <text x="${w/2}" y="${height/2}" font-family="${fontFamily}" font-weight="${fontWeight}" font-size="${fontSize}" fill="${color}" text-anchor="middle" dominant-baseline="middle">${text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</text>
   </svg>`;
   await sharp(Buffer.from(svg)).png().toFile(outPath);
   return { width: w, height };
@@ -122,13 +121,13 @@ async function buildVideo({ logoPath, agentName, agentUrl, outputPath, jobDir })
   const lcY = Math.round(VH * 0.69 - lcH / 2);
   const lcX = Math.round((VW - lcW) / 2);
 
-  // --- VIP URL text: beneath QR, black Inter font, 1.5x previous size
-  // Previous was ~3.8% height; 1.5x = ~5.7%
+  // --- VIP URL text: DM Sans Bold to match the MyHome by MyPorta logo font
   const URL_FONT_SIZE = Math.round(VH * 0.057);
   const urlDims = await makeTextPng(vipUrl, txtVipUrl, {
     fontSize: URL_FONT_SIZE,
     color: '#000000',
-    fontFamily: 'Inter, Helvetica, Arial, sans-serif',
+    fontFamily: '"DM Sans", "DMSans", Helvetica, Arial, sans-serif',
+    fontWeight: 'bold',
     height: Math.round(URL_FONT_SIZE * 1.8)
   });
 
