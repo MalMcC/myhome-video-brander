@@ -5,7 +5,7 @@ const { execSync } = require('child_process');
 const QRCode = require('qrcode');
 const sharp = require('sharp');
 
-const MASTER = path.join(__dirname, 'master', 'myhome-advert-raw.mp4');
+const MASTER = path.join(__dirname, 'master', process.env.MASTER_VIDEO || 'myhome-rural-raw.mp4');
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || 'sk_1834f270e20daf5c0798106ddbf154fd5d131fdf9a0a7240';
 const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'G7ILShrCNLfmS0A37SXS';
 const VW = 1920, VH = 1080;

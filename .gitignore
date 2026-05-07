@@ -1,6 +1,8 @@
 node_modules/
 uploads/
 output/
-master/
-*.mp4
 *.mp3
+# Allow master videos but not temp files
+!master/
+!master/*.mp4
+MyHome_Rural_Raw_260506.mp4
