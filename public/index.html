@@ -41,8 +41,9 @@
     <label>Agent Name</label>
     <input type="text" id="agentName" placeholder="e.g. Kelvin Francis" />
 
-    <label>Agent Website URL (for QR code)</label>
+    <label>Agent Website URL</label>
     <input type="url" id="agentUrl" placeholder="e.g. https://kelvinfrancis.com" />
+    <div id="vipPreview" style="font-size:13px;color:#f97316;margin-top:-14px;margin-bottom:20px;display:none;">QR code → <strong id="vipPreviewUrl"></strong></div>
 
     <label>Agent Logo</label>
     <div class="upload-zone" id="uploadZone">
@@ -85,7 +86,30 @@
       }
     });
     agentName.addEventListener('input', checkReady);
-    agentUrl.addEventListener('input', checkReady);
+    agentUrl.addEventListener('input', () => { updateVipPreview(); checkReady(); });
+
+    function deriveSlug(url) {
+      try {
+        const u = url.startsWith('http') ? url : 'https://' + url;
+        let host = new URL(u).hostname.replace(/^www\./, '');
+        return host.split('.')[0].toLowerCase();
+      } catch(e) {
+        return url.replace(/^https?:\/\//, '').replace(/^www\./, '').split('.')[0].toLowerCase();
+      }
+    }
+
+    function updateVipPreview() {
+      const v = agentUrl.value.trim();
+      const preview = document.getElementById('vipPreview');
+      const previewUrl = document.getElementById('vipPreviewUrl');
+      if (v) {
+        const slug = deriveSlug(v);
+        previewUrl.textContent = `vip.myporta.ai/${slug}`;
+        preview.style.display = 'block';
+      } else {
+        preview.style.display = 'none';
+      }
+    }
 
     function checkReady() {
       generateBtn.disabled = !(agentName.value.trim() && agentUrl.value.trim() && logoFile);

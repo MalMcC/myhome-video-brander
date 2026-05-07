@@ -50,26 +50,48 @@ async function resizeLogo(logoPath, outPath, width, height) {
   await sharp(logoPath).resize(width, height, { fit: 'inside', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toFile(outPath);
 }
 
+function deriveVipSlug(agentUrl) {
+  // Extract domain, strip www, take first part before first dot, preserve hyphens
+  // e.g. https://kelvinfrancis.com -> kelvinfrancis
+  //      https://www.your-ipswich.co.uk -> your-ipswich
+  try {
+    const url = agentUrl.startsWith('http') ? agentUrl : `https://${agentUrl}`;
+    let host = new URL(url).hostname.replace(/^www\./, '');
+    // Take everything before the first dot
+    const slug = host.split('.')[0];
+    return slug.toLowerCase();
+  } catch (e) {
+    // Fallback: strip protocol and take first path segment
+    return agentUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').split('.')[0].toLowerCase();
+  }
+}
+
 async function buildVideo({ logoPath, agentName, agentUrl, outputPath, jobDir }) {
   console.log(`[Pipeline] Starting for: ${agentName}`);
+
+  const slug       = deriveVipSlug(agentUrl);
+  const vipUrl     = `vip.myporta.ai/${slug}`;
+  const vipQrUrl   = `https://${vipUrl}`;
+  console.log(`[Pipeline] VIP URL: ${vipQrUrl}`);
 
   const voicePath   = path.join(jobDir, 'voice.mp3');
   const qrPath      = path.join(jobDir, 'qr.png');
   const logoSmall   = path.join(jobDir, 'logo_small.png');
   const logoLarge   = path.join(jobDir, 'logo_large.png');
   const txtPartner  = path.join(jobDir, 'txt_partner.png');
-  const txtUrl      = path.join(jobDir, 'txt_url.png');
+  const txtVipUrl   = path.join(jobDir, 'txt_vip_url.png');
 
   // 1. Generate assets
   console.log('[1/4] Generating voiceover...');
   await elevenLabsTTS(`MyHome by MyPorta. Just four pounds and ninety-nine pence a month. Cancel anytime. And your first month is on ${agentName}. Know your place with MyHome.`, voicePath);
 
   console.log('[2/4] Building overlays...');
-  await generateQRCode(agentUrl, qrPath);
+  await generateQRCode(vipQrUrl, qrPath);
   await resizeLogo(logoPath, logoSmall, 180, 90);
   await resizeLogo(logoPath, logoLarge, 480, 200);
   await makeTextPng(`In partnership with ${agentName}`, txtPartner, { fontSize: 42, height: 120 });
-  await makeTextPng(agentUrl, txtUrl, { fontSize: 28, height: 80 });
+  // VIP URL text — displayed below QR on outro, slightly smaller so it's clean
+  await makeTextPng(vipUrl, txtVipUrl, { fontSize: 34, height: 70, color: '#f97316' });
 
   // 2. Mix audio
   console.log('[3/4] Mixing audio...');
@@ -89,11 +111,24 @@ async function buildVideo({ logoPath, agentName, agentUrl, outputPath, jobDir })
   // 3. Composite video (all-image overlays, no drawtext)
   console.log('[4/4] Rendering video...');
   const M = 40;
-  const lsX = VW - 180 - M, lsY = M;                            // small logo top-right
-  const llX = Math.round((VW-480)/2), llY = Math.round(VH*0.50); // large logo centred
-  const txX = 0, txY = llY + 210;                                 // "In partnership with" below logo
-  const qrX = Math.round((VW-280)/2), qrY = Math.round(VH*0.60);
-  const urlX = 0, urlY = qrY + 292;
+  const lsX = VW - 180 - M, lsY = M;                             // small logo top-right
+  const llX = Math.round((VW-480)/2), llY = Math.round(VH*0.42); // large logo centred on outro
+  const txX = 0, txY = llY + 215;                                 // "In partnership with" below logo
+
+  // Outro layout: QR on left, URL text centred below QR
+  // QR sits left-of-centre so URL text has clear space to the right
+  const qrSize = 220;
+  const qrX = Math.round(VW * 0.35) - Math.round(qrSize / 2);    // ~35% from left
+  const qrY = Math.round(VH * 0.58);
+  // URL text centred under the QR code — same horizontal centre, well below it
+  const urlTextW = 700;
+  const urlX = Math.round(VW * 0.35) - Math.round(urlTextW / 2);
+  const urlY = qrY + qrSize + 18;                                 // 18px gap below QR
+
+  // Regenerate QR at the smaller size used here
+  await QRCode.toFile(qrPath, vipQrUrl, { width: qrSize, margin: 1, color: { dark: '#1a1a2e', light: '#ffffff' } });
+  // Regenerate URL text at correct width
+  await makeTextPng(vipUrl, txtVipUrl, { fontSize: 30, height: 56, width: urlTextW, color: '#f97316' });
 
   run(`ffmpeg -y \
     -i "${MASTER}" \
@@ -102,7 +137,7 @@ async function buildVideo({ logoPath, agentName, agentUrl, outputPath, jobDir })
     -i "${logoSmall}" \
     -i "${qrPath}" \
     -i "${txtPartner}" \
-    -i "${txtUrl}" \
+    -i "${txtVipUrl}" \
     -filter_complex "\
       [0:v][2:v]overlay=x=${llX}:y=${llY}:enable='between(t,2,4.13)'[v1];\
       [v1][5:v]overlay=x=${txX}:y=${txY}:enable='between(t,2,4.13)'[v2];\
