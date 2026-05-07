@@ -121,11 +121,13 @@ async function buildVideo({ logoPath, agentName, agentUrl, outputPath, jobDir })
   const lcY = Math.round(VH * 0.69 - lcH / 2);
   const lcX = Math.round((VW - lcW) / 2);
 
-  // --- VIP URL text: beneath QR, centred on same horizontal centre as QR
-  const URL_FONT_SIZE = Math.round(VH * 0.038);  // ~3.8% of height
+  // --- VIP URL text: beneath QR, black Inter font, 1.5x previous size
+  // Previous was ~3.8% height; 1.5x = ~5.7%
+  const URL_FONT_SIZE = Math.round(VH * 0.057);
   const urlDims = await makeTextPng(vipUrl, txtVipUrl, {
     fontSize: URL_FONT_SIZE,
-    color: '#ffffff',
+    color: '#000000',
+    fontFamily: 'Inter, Helvetica, Arial, sans-serif',
     height: Math.round(URL_FONT_SIZE * 1.8)
   });
 
