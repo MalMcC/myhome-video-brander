@@ -18,6 +18,65 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const jobs = {};
 
+// Accept logoUrl instead of file upload — fetches logo server-side
+app.post('/brand-url', express.json(), async (req, res) => {
+  const { agentName, agentUrl, logoUrl } = req.body || {};
+  if (!logoUrl || !agentName || !agentUrl) {
+    return res.status(400).json({ error: 'logoUrl, agentName and agentUrl are required' });
+  }
+
+  const jobId = crypto.randomBytes(6).toString('hex');
+  const jobDir = path.join(__dirname, 'uploads', jobId);
+  fs.mkdirSync(jobDir, { recursive: true });
+
+  const outputDir = path.join(__dirname, 'output');
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  jobs[jobId] = { status: 'processing', agentName, agentUrl, createdAt: new Date().toISOString() };
+  res.json({ jobId, status: 'processing', pollUrl: `/status/${jobId}` });
+
+  // Fetch logo from URL or decode data URL
+  let logoPath;
+  try {
+    if (logoUrl.startsWith('data:')) {
+      const matches = logoUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (!matches) throw new Error('Invalid data URL');
+      const ext = matches[1].split('/')[1] || 'png';
+      logoPath = path.join(jobDir, `logo.${ext}`);
+      fs.writeFileSync(logoPath, Buffer.from(matches[2], 'base64'));
+    } else {
+      const https = require('https');
+      const http = require('http');
+      const ext = path.extname(new URL(logoUrl).pathname) || '.png';
+      logoPath = path.join(jobDir, `logo${ext}`);
+      await new Promise((resolve, reject) => {
+        const client = logoUrl.startsWith('https') ? https : http;
+        const file = fs.createWriteStream(logoPath);
+        client.get(logoUrl, res => { res.pipe(file); file.on('finish', resolve); }).on('error', reject);
+      });
+    }
+  } catch(e) {
+    jobs[jobId].status = 'error';
+    jobs[jobId].error = 'Logo fetch failed: ' + e.message;
+    return;
+  }
+
+  buildVideo({ logoPath, agentName, agentUrl, outputDir, jobDir })
+    .then(results => {
+      jobs[jobId].status = 'done';
+      jobs[jobId].variants = {
+        rural: { downloadUrl: `/download/${jobId}/rural`, thumbUrl: `/thumb/${jobId}/rural` },
+        urban: { downloadUrl: `/download/${jobId}/urban`, thumbUrl: `/thumb/${jobId}/urban` }
+      };
+      jobs[jobId]._results = results;
+    })
+    .catch(err => {
+      console.error(`[Job ${jobId}] Error:`, err.message);
+      jobs[jobId].status = 'error';
+      jobs[jobId].error = err.message;
+    });
+});
+
 app.post('/brand', upload.single('logo'), async (req, res) => {
   const { agentName, agentUrl } = req.body;
   if (!req.file || !agentName || !agentUrl) {
