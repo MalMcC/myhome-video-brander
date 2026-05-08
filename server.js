@@ -19,7 +19,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 const jobs = {};
 
 // Accept logoUrl instead of file upload — fetches logo server-side
-app.post('/brand-url', express.json(), async (req, res) => {
+app.post('/brand-url', express.json({ limit: '10mb' }), async (req, res) => {
   const { agentName, agentUrl, logoUrl } = req.body || {};
   if (!logoUrl || !agentName || !agentUrl) {
     return res.status(400).json({ error: 'logoUrl, agentName and agentUrl are required' });
