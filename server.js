@@ -119,26 +119,49 @@ app.post('/brand', upload.single('logo'), async (req, res) => {
     });
 });
 
+// ── Disk-based fallback: restore job from output files if in-memory map is empty (after restart) ──
+function restoreJobFromDisk(jobId) {
+  const outputDir = path.join(__dirname, 'output');
+  const ruralPath  = path.join(outputDir, `myhome-rural-${jobId}.mp4`);
+  const urbanPath  = path.join(outputDir, `myhome-urban-${jobId}.mp4`);
+  const ruralThumb = path.join(outputDir, `myhome-rural-${jobId}-thumb.jpg`);
+  const urbanThumb = path.join(outputDir, `myhome-urban-${jobId}-thumb.jpg`);
+  if (fs.existsSync(ruralPath) && fs.existsSync(urbanPath)) {
+    jobs[jobId] = {
+      status: 'done', agentName: 'restored', agentUrl: '', createdAt: new Date().toISOString(),
+      variants: {
+        rural: { downloadUrl: `/download/${jobId}/rural`, thumbUrl: `/thumb/${jobId}/rural` },
+        urban: { downloadUrl: `/download/${jobId}/urban`, thumbUrl: `/thumb/${jobId}/urban` }
+      },
+      _results: {
+        rural: { outputPath: ruralPath, thumbPath: fs.existsSync(ruralThumb) ? ruralThumb : ruralPath },
+        urban: { outputPath: urbanPath, thumbPath: fs.existsSync(urbanThumb) ? urbanThumb : urbanPath }
+      }
+    };
+    return jobs[jobId];
+  }
+  return null;
+}
+
 app.get('/status/:jobId', (req, res) => {
-  const job = jobs[req.params.jobId];
+  let job = jobs[req.params.jobId] || restoreJobFromDisk(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
-  // Return public fields only
   const { status, agentName, agentUrl, createdAt, variants, error } = job;
   res.json({ status, agentName, agentUrl, createdAt, variants, error });
 });
 
 app.get('/download/:jobId/:variant', (req, res) => {
-  const job = jobs[req.params.jobId];
+  let job = jobs[req.params.jobId] || restoreJobFromDisk(req.params.jobId);
   const variant = req.params.variant;
   if (!job || job.status !== 'done') return res.status(404).json({ error: 'Not ready' });
   const result = job._results?.[variant];
-  if (!result) return res.status(404).json({ error: 'Variant not found' });
-  const agentSlug = job.agentName.replace(/\s+/g, '-');
+  if (!result || !fs.existsSync(result.outputPath)) return res.status(404).json({ error: 'Variant not found' });
+  const agentSlug = (job.agentName || 'myhome').replace(/\s+/g, '-');
   res.download(result.outputPath, `myhome-${variant}-${agentSlug}.mp4`);
 });
 
 app.get('/thumb/:jobId/:variant', (req, res) => {
-  const job = jobs[req.params.jobId];
+  let job = jobs[req.params.jobId] || restoreJobFromDisk(req.params.jobId);
   const variant = req.params.variant;
   if (!job || job.status !== 'done') return res.status(404).json({ error: 'Not ready' });
   const result = job._results?.[variant];
