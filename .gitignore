@@ -6,3 +6,9 @@ output/
 !master/
 !master/*.mp4
 MyHome_Rural_Raw_260506.mp4
+MyHome_Urban_Raw_260506.mp4
+
+# Raw source footage: large, and the master lives outside git. Ignore any raw
+# capture rather than naming them one at a time — the Urban file was missed by
+# the per-file list and sat untracked at 55MB.
+*_Raw_*.mp4
