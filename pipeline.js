@@ -1,175 +1,136 @@
-const fs = require('fs');
-const path = require('path');
-const https = require('https');
-const { execSync } = require('child_process');
+const path = require('node:path');
+const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
 const QRCode = require('qrcode');
 const sharp = require('sharp');
 
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || 'sk_1834f270e20daf5c0798106ddbf154fd5d131fdf9a0a7240';
-const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'G7ILShrCNLfmS0A37SXS';
-
-// Variant config: timings in SS:FF (seconds:frames at 24fps)
-const VARIANTS = {
-  rural: {
-    file: 'myhome-rural-raw.mp4',
-    label: 'Rural',
-    logoCentreIn:  [1,  13],   // 01:13
-    logoCentreOut: [4,   8],   // 04:08
-    logoTrIn:      [4,  19],   // 04:19
-    qrIn:          [53,  7],   // 53:07
-    thumbTime:     9 + 14/24,  // 09:14
-  },
-  urban: {
-    file: 'myhome-urban-raw.mp4',
-    label: 'Urban',
-    logoCentreIn:  [0,  20],   // 00:20
-    logoCentreOut: [3,  18],   // 03:18
-    logoTrIn:      [5,   8],   // 05:08
-    qrIn:          [54,  7],   // 54:07
-    thumbTime:     12 + 4/24,  // 12:04
-  }
+const run = promisify(execFile);
+const VARIANTS = ['rural', 'urban'];
+const SHAPES = {
+  landscape: { width: 1920, height: 1080, suffix: '' },
+  portrait: { width: 1080, height: 1920, suffix: '-portrait' }
 };
-
-function run(cmd) {
-  return execSync(cmd, { encoding: 'utf8', maxBuffer: 100 * 1024 * 1024, stdio: ['pipe','pipe','pipe'] });
-}
-
-function getVideoInfo(filePath) {
-  const out = run(`ffprobe -v quiet -print_format json -show_streams "${filePath}"`);
-  const streams = JSON.parse(out).streams;
-  const v = streams.find(s => s.codec_type === 'video');
-  const [fpsNum, fpsDen] = v.r_frame_rate.split('/').map(Number);
-  return { width: v.width, height: v.height, fps: fpsNum / fpsDen };
-}
-
-function toSecs([ss, ff], fps) {
-  return ss + ff / fps;
-}
+const FILM_END = 41.7;
+const CARD_SECONDS = 12;
+const BRANCHES_PER_CARD = 4;
+const VIDEO_VERSION = 'mydomi-masters-v1';
+const WORDMARK = path.join(__dirname, 'brand', 'mydomi-wordmark.png');
 
 function deriveVipSlug(agentUrl) {
-  try {
-    const url = agentUrl.startsWith('http') ? agentUrl : `https://${agentUrl}`;
-    let host = new URL(url).hostname.replace(/^www\./, '');
-    return host.split('.')[0].toLowerCase();
-  } catch (e) {
-    return agentUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').split('.')[0].toLowerCase();
-  }
+  return new URL(agentUrl).hostname.replace(/^www\./, '').split('.')[0].toLowerCase();
 }
 
-async function makeTextPng(text, outPath, { fontSize = 40, color = 'white', fontFamily = 'Helvetica, Arial, sans-serif', fontWeight = 'normal', width, height = 120 } = {}) {
-  const w = width || Math.max(500, text.length * fontSize * 0.65);
-  const safeFontFamily = fontFamily.replace(/"/g, "'");
-  const svg = `<svg width="${w}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-    <text x="${w/2}" y="${height/2}" font-family="${safeFontFamily}" font-weight="${fontWeight}" font-size="${fontSize}" fill="${color}" text-anchor="middle" dominant-baseline="middle">${text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</text>
-  </svg>`;
-  await sharp(Buffer.from(svg)).png().toFile(outPath);
-  return { width: w, height };
+function esc(value) {
+  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-async function resizeLogo(logoPath, outPath, maxW, maxH) {
-  await sharp(logoPath).resize(maxW, maxH, { fit: 'inside', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toFile(outPath);
-  return await sharp(outPath).metadata();
+function text(value, x, y, size, width, { bold = false, color = '#FFFFFF' } = {}) {
+  const fitted = Math.min(size, Math.floor(width / Math.max(1, [...String(value)].length * 0.57)));
+  return `<text x="${x}" y="${y}" font-family="DejaVu Sans, Arial, sans-serif" font-size="${fitted}" font-weight="${bold ? 700 : 400}" fill="${color}">${esc(value)}</text>`;
 }
 
-async function extractThumb(videoPath, timeSecs, outPath) {
-  run(`ffmpeg -y -ss ${timeSecs.toFixed(3)} -i "${videoPath}" -vframes 1 -q:v 3 "${outPath}"`);
-}
-
-async function buildVariant({ variant, logoPath, agentName, agentUrl, outputPath, thumbPath, jobDir }) {
-  const cfg = VARIANTS[variant];
-  if (!cfg) throw new Error(`Unknown variant: ${variant}`);
-
-  const masterPath = path.join(__dirname, 'master', cfg.file);
-  const info = getVideoInfo(masterPath);
-  const { width: VW, height: VH, fps: FPS } = info;
-
-  const slug     = deriveVipSlug(agentUrl);
-  const vipUrl   = `vip.myporta.ai/${slug}`;
-  const vipQrUrl = `https://${vipUrl}`;
-
-  const T_CENTRE_IN  = toSecs(cfg.logoCentreIn,  FPS);
-  const T_CENTRE_OUT = toSecs(cfg.logoCentreOut, FPS);
-  const T_TR_IN      = toSecs(cfg.logoTrIn,      FPS);
-  const T_QR_IN      = toSecs(cfg.qrIn,          FPS);
-
-  console.log(`[${cfg.label}] ${VW}x${VH} @ ${FPS}fps | centre ${T_CENTRE_IN.toFixed(2)}-${T_CENTRE_OUT.toFixed(2)}s | top-right from ${T_TR_IN.toFixed(2)}s | QR from ${T_QR_IN.toFixed(2)}s`);
-
-  const qrPath     = path.join(jobDir, `${variant}_qr.png`);
-  const logoSmall  = path.join(jobDir, `${variant}_logo_small.png`);
-  const logoCentre = path.join(jobDir, `${variant}_logo_centre.png`);
-  const txtVipUrl  = path.join(jobDir, `${variant}_txt_url.png`);
-
-  // --- QR: 5cm = 17.5% of VH at 1080p = 189px
-  const QR_SIZE = Math.round(VH * 0.175);
-  await QRCode.toFile(qrPath, vipQrUrl, { width: QR_SIZE, margin: 2, color: { dark: '#000000', light: '#ffffff' } });
-
-  // --- Top-right logo: ~5mm margin, max 12% wide, 9% tall
-  const TR_MARGIN = Math.round(VW * 0.018);
-  await resizeLogo(logoPath, logoSmall, Math.round(VW * 0.12), Math.round(VH * 0.09));
-  const lsMeta = await sharp(logoSmall).metadata();
-  const lsX = VW - lsMeta.width - TR_MARGIN;
-  const lsY = TR_MARGIN;
-
-  // --- Centre logo: 35% wide, 20% tall, vertically at ~69% (midpoint between MyHome logo bottom ~38% and screen bottom)
-  await resizeLogo(logoPath, logoCentre, Math.round(VW * 0.35), Math.round(VH * 0.20));
-  const lcMeta = await sharp(logoCentre).metadata();
-  const lcX = Math.round((VW - lcMeta.width) / 2);
-  const lcY = Math.round(VH * 0.69 - lcMeta.height / 2);
-
-  // --- VIP URL text: DM Sans Bold, black, same size/position for both variants
-  const URL_FONT_SIZE = Math.round(VH * 0.057);
-  const urlDims = await makeTextPng(vipUrl, txtVipUrl, {
-    fontSize: URL_FONT_SIZE,
-    color: '#000000',
-    fontFamily: "'DM Sans', DMSans, Helvetica, Arial, sans-serif",
-    fontWeight: 'bold',
-    height: Math.round(URL_FONT_SIZE * 1.8)
+function cardMarkup(shape, agentName, referral, branches, page, pages) {
+  const portrait = shape === SHAPES.portrait;
+  const { width, height } = shape;
+  const margin = portrait ? 80 : 110;
+  const contactTop = portrait ? 910 : 548;
+  const cardWidth = portrait ? 920 : 820;
+  const cardHeight = portrait ? 188 : 183;
+  const colGap = portrait ? 0 : 60;
+  const cards = branches.map((branch, index) => {
+    const col = portrait ? 0 : index % 2;
+    const row = portrait ? index : Math.floor(index / 2);
+    const x = margin + col * (cardWidth + colGap);
+    const y = contactTop + row * (cardHeight + 22);
+    return `<rect x="${x}" y="${y}" width="${cardWidth}" height="${cardHeight}" rx="22" fill="#22264D"/>
+      ${text(branch.name, x + 30, y + 50, portrait ? 37 : 43, cardWidth - 60, { bold: true })}
+      ${text(branch.phone, x + 30, y + 105, portrait ? 42 : 47, cardWidth - 60)}
+      ${text(branch.email, x + 30, y + 150, portrait ? 36 : 42, cardWidth - 60, { color: '#DCE0FF' })}`;
   });
-
-  // --- QR + URL positions: centred on screen
-  const qrX   = Math.round((VW - QR_SIZE) / 2);
-  const qrY   = Math.round(VH * 0.45);
-  const urlX  = Math.round((VW - urlDims.width) / 2);
-  const urlY  = qrY + QR_SIZE + Math.round(VH * 0.015);
-
-  // --- Render
-  run(`ffmpeg -y \
-    -i "${masterPath}" \
-    -i "${logoCentre}" \
-    -i "${logoSmall}" \
-    -i "${qrPath}" \
-    -i "${txtVipUrl}" \
-    -filter_complex "\
-      [0:v][1:v]overlay=x=${lcX}:y=${lcY}:enable='between(t,${T_CENTRE_IN},${T_CENTRE_OUT})'[v1];\
-      [v1][2:v]overlay=x=${lsX}:y=${lsY}:enable='between(t,${T_TR_IN},9999)'[v2];\
-      [v2][3:v]overlay=x=${qrX}:y=${qrY}:enable='between(t,${T_QR_IN},9999)'[v3];\
-      [v3][4:v]overlay=x=${urlX}:y=${urlY}:enable='between(t,${T_QR_IN},9999)'[vout]" \
-    -map "[vout]" -map "0:a" \
-    -c:v libx264 -preset fast -crf 18 \
-    -c:a copy \
-    "${outputPath}"`);
-
-  // --- Thumbnail
-  if (thumbPath) {
-    await extractThumb(outputPath, cfg.thumbTime, thumbPath);
-  }
-
-  return outputPath;
+  const ruleY = portrait ? 864 : 502;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+    <rect width="100%" height="100%" fill="#13152D"/>
+    <rect x="${margin}" y="${portrait ? 245 : 72}" width="${portrait ? 397 : 340}" height="${portrait ? 149 : 140}" rx="24" fill="white"/>
+    ${text(agentName, portrait ? 80 : 490, portrait ? 467 : 163, portrait ? 54 : 63, portrait ? 910 : 925, { bold: true })}
+    ${text('Claim your home', margin, portrait ? 586 : 343, portrait ? 75 : 104, portrait ? 608 : 1120, { bold: true })}
+    ${text(referral, margin, portrait ? 654 : 426, portrait ? 44 : 51, portrait ? 608 : 1150, { color: '#DCE0FF' })}
+    ${text('Scan to get started', portrait ? 688 : 1435, portrait ? 811 : 442, portrait ? 33 : 37, 350, { bold: true })}
+    <path d="M${margin} ${ruleY}H${width-margin}" stroke="#555D98" stroke-width="2"/>
+    ${cards.join('')}
+    ${pages > 1 ? text(`Branch contacts ${page} of ${pages}`, portrait ? margin : 1300, height - (portrait ? 82 : 70), 30, 500, { color: '#DCE0FF' }) : ''}
+  </svg>`;
 }
 
-async function buildVideo({ logoPath, agentName, agentUrl, outputDir, jobDir }) {
-  const slug = deriveVipSlug(agentUrl);
-  const results = {};
+async function preparedImage(input, width, height) {
+  return sharp(input, { limitInputPixels: 16_000_000 })
+    .resize(width, height, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .png().toBuffer();
+}
 
-  for (const variant of ['rural', 'urban']) {
-    const outputPath = path.join(outputDir, `myhome-${variant}-${path.basename(jobDir)}.mp4`);
-    const thumbPath  = path.join(outputDir, `myhome-${variant}-${path.basename(jobDir)}-thumb.jpg`);
-    console.log(`\n[Pipeline] Building ${variant} variant...`);
-    await buildVariant({ variant, logoPath, agentName, agentUrl, outputPath, thumbPath, jobDir });
-    results[variant] = { outputPath, thumbPath };
+async function makeEndCards({ shape, logoPath, agentName, referral, branches, jobDir }) {
+  if (!branches.length) throw new Error('Branch contacts are missing');
+  const portrait = shape === SHAPES.portrait;
+  const qr = await QRCode.toBuffer('https://' + referral, { width: portrait ? 214 : 280, margin: 3, errorCorrectionLevel: 'M' });
+  const wordmark = await preparedImage(WORDMARK, portrait ? 380 : 470, 108);
+  const logo = await preparedImage(logoPath, portrait ? 365 : 308, portrait ? 117 : 108);
+  const overlays = [
+    { input: qr, left: portrait ? 707 : 1455, top: portrait ? 566 : 102 },
+    { input: wordmark, left: portrait ? 80 : 110, top: portrait ? 106 : 952 },
+    { input: logo, left: portrait ? 96 : 126, top: portrait ? 261 : 88 }
+  ];
+  const pages = Math.ceil(branches.length / BRANCHES_PER_CARD);
+  const files = [];
+  for (let page = 0; page < pages; page++) {
+    const start = page * BRANCHES_PER_CARD;
+    const file = path.join(jobDir, `end-${shape.width}-${page}.png`);
+    const svg = cardMarkup(shape, agentName, referral, branches.slice(start, start + BRANCHES_PER_CARD), page + 1, pages);
+    await sharp(Buffer.from(svg)).composite(overlays).png().toFile(file);
+    files.push(file);
   }
+  return files;
+}
 
+async function buildVariant({ variant, shape, logo, cards, outputPath, thumbPath }) {
+  const master = path.join(__dirname, 'master', `mydomi-${variant}.mp4`);
+  const duration = FILM_END + CARD_SECONDS * cards.length;
+  const { width, height } = shape;
+  const graph = [
+    `[0:v]fps=24,scale=${width}:${height}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=0x13152D,tpad=stop_mode=clone:stop_duration=${duration}[film]`,
+    `[film][1:v]overlay=x=W-w-36:y=36:enable='between(t,3,${FILM_END})'[intro]`
+  ];
+  cards.forEach((_, index) => {
+    const start = FILM_END + CARD_SECONDS * index;
+    graph.push(`[${index === 0 ? 'intro' : 'card' + (index-1)}][${index+2}:v]overlay=enable='gte(t,${start})'[${index === cards.length - 1 ? 'out' : 'card'+index}]`);
+  });
+  await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-filter_complex_threads', '2',
+    '-i', master, '-i', logo, ...cards.flatMap(file => ['-i', file]), '-filter_complex', graph.join(';'),
+    '-map', '[out]', '-map', '0:a:0', '-af', 'apad', '-t', String(duration),
+    '-c:v', 'libx264', '-threads', '4', '-preset', 'fast', '-crf', '20',
+    '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', outputPath]);
+  await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-ss', '12', '-i', outputPath,
+    '-frames:v', '1', '-vf', 'scale=720:-2', '-q:v', '3', thumbPath]);
+}
+
+async function buildVideo({ logoPath, agentName, agentUrl, outputDir, jobDir, branches }) {
+  const referral = `vip.myporta.ai/${deriveVipSlug(agentUrl)}`;
+  const logo = path.join(jobDir, 'agency-overlay.png');
+  const padding = { top: 12, right: 14, bottom: 12, left: 14, background: 'white' };
+  await sharp(await preparedImage(logoPath, 256, 92))
+    .extend(padding).flatten({ background: 'white' }).png().toFile(logo);
+  const results = {};
+  const jobId = path.basename(jobDir);
+  for (const shape of Object.values(SHAPES)) {
+    const cards = await makeEndCards({ shape, logoPath, agentName, referral, branches, jobDir });
+    for (const variant of VARIANTS) {
+      const key = variant + shape.suffix;
+      const prefix = path.join(outputDir, `mydomi-${key}-${jobId}`);
+      const outputPath = prefix + '.mp4';
+      const thumbPath = prefix + '-thumb.jpg';
+      await buildVariant({ variant, shape, logo, cards, outputPath, thumbPath });
+      results[key] = { outputPath, thumbPath };
+    }
+  }
   return results;
 }
 
-module.exports = { buildVideo, VARIANTS };
+module.exports = { buildVideo, VIDEO_VERSION, VARIANTS, SHAPES };
