@@ -46,7 +46,7 @@
 <body>
   <div class="card">
     <h1>🎬 MyDomi Video Brander</h1>
-    <p class="sub">Generates both Rural and Urban branded videos for your agent.</p>
+    <p class="sub">Make the rural and urban MyDomi films in landscape and portrait, with your agency branding.</p>
 
     <label>Agent Name</label>
     <input type="text" id="agentName" placeholder="e.g. Kelvin Francis" />
@@ -54,6 +54,11 @@
     <label>Agent Website URL</label>
     <input type="url" id="agentUrl" placeholder="e.g. https://kelvinfrancis.com" />
     <div class="vip-preview" id="vipPreview">QR code → <strong id="vipPreviewUrl"></strong></div>
+
+    <label for="branches">Public branch contacts</label>
+    <p>List every branch covered. Use one line per branch: branch name | public phone | public email | official branch contact page.</p>
+    <textarea id="branches" rows="5" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;"></textarea>
+    <label><input id="allBranchesConfirmed" type="checkbox"> I’ve included every branch these films represent.</label>
 
     <label>Agent Logo</label>
     <div class="upload-zone" id="uploadZone">
@@ -76,14 +81,16 @@
         <img class="variant-thumb loading" id="thumb-rural" />
         <div class="variant-info">
           <div class="variant-label">🌿 Rural</div>
-          <a class="dl-btn" id="dl-rural" href="#">⬇️ Download Rural</a>
+          <a class="dl-btn" id="dl-rural" href="#">Download landscape</a>
+          <a class="dl-btn" id="dl-rural-portrait" href="#">Download portrait</a>
         </div>
       </div>
       <div class="variant-card" id="card-urban">
         <img class="variant-thumb loading" id="thumb-urban" />
         <div class="variant-info">
           <div class="variant-label">🏙️ Urban</div>
-          <a class="dl-btn" id="dl-urban" href="#">⬇️ Download Urban</a>
+          <a class="dl-btn" id="dl-urban" href="#">Download landscape</a>
+          <a class="dl-btn" id="dl-urban-portrait" href="#">Download portrait</a>
         </div>
       </div>
     </div>
@@ -92,6 +99,8 @@
   <script>
     const agentNameEl = document.getElementById('agentName');
     const agentUrlEl  = document.getElementById('agentUrl');
+    const branchesEl = document.getElementById('branches');
+    const confirmedEl = document.getElementById('allBranchesConfirmed');
     const logoInput   = document.getElementById('logoInput');
     const uploadZone  = document.getElementById('uploadZone');
     const logoPreview = document.getElementById('logo-preview');
@@ -115,6 +124,8 @@
     });
 
     agentNameEl.addEventListener('input', checkReady);
+    branchesEl.addEventListener('input', checkReady);
+    confirmedEl.addEventListener('change', checkReady);
     agentUrlEl.addEventListener('input', () => { updateVipPreview(); checkReady(); });
 
     function deriveSlug(url) {
@@ -138,7 +149,7 @@
     }
 
     function checkReady() {
-      generateBtn.disabled = !(agentNameEl.value.trim() && agentUrlEl.value.trim() && logoFile);
+      generateBtn.disabled = !(agentNameEl.value.trim() && agentUrlEl.value.trim() && branchesEl.value.trim() && confirmedEl.checked && logoFile);
     }
 
     generateBtn.addEventListener('click', async () => {
@@ -149,31 +160,45 @@
       statusLabel.textContent = 'Processing...';
       progressFill.style.width = '15%';
       progressFill.style.animation = 'pulse 1.5s ease-in-out infinite';
-      statusMsg.textContent = 'Generating both Rural and Urban videos — takes about 3–4 minutes.';
+      statusMsg.textContent = 'Checking your official branch contact pages…';
 
       const fd = new FormData();
       fd.append('logo', logoFile);
       fd.append('agentName', agentNameEl.value.trim());
       fd.append('agentUrl', agentUrlEl.value.trim());
 
-      const resp = await fetch('/brand', { method: 'POST', body: fd });
-      const { jobId, error } = await resp.json();
-      if (error) { showError(error); return; }
+      fd.append('branches', branchesEl.value);
+      fd.append('allBranchesConfirmed', String(confirmedEl.checked));
 
-      progressFill.style.width = '30%';
-      poll(jobId);
+      try {
+        const resp = await fetch('/brand', { method: 'POST', body: fd });
+        const { jobId, error } = await resp.json();
+        if (!resp.ok || !jobId) throw new Error(error || 'We couldn’t start the films.');
+        statusMsg.textContent = 'Contacts verified. We’re making your films.';
+        progressFill.style.width = '30%';
+        poll(jobId);
+      } catch (error) { showError(error.message); }
     });
 
     function poll(jobId) {
+      const started = Date.now();
+      let checking = false;
       const interval = setInterval(async () => {
+        if (checking) return;
+        checking = true;
+        try {
+        if (Date.now() - started > 20 * 60 * 1000) throw new Error('The films are taking longer than expected. Please try again.');
         const resp = await fetch(`/status/${jobId}`);
         const job = await resp.json();
+        if (!resp.ok) throw new Error(job.error || 'We couldn’t load the films.');
         if (job.status === 'done') {
           clearInterval(interval);
           progressFill.style.width = '100%';
           progressFill.style.animation = 'none';
           statusLabel.className = 'status-label done';
-          statusLabel.textContent = '✅ Both videos ready!';
+          statusLabel.textContent = 'Your films are ready';
+          document.getElementById('dl-rural-portrait').href = job.variants['rural-portrait'].downloadUrl;
+          document.getElementById('dl-urban-portrait').href = job.variants['urban-portrait'].downloadUrl;
           statusMsg.textContent = '';
 
           // Wire up download links and thumbnails
@@ -192,6 +217,10 @@
         } else {
           progressFill.style.width = '65%';
         }
+        } catch (error) {
+          clearInterval(interval);
+          showError(error.message);
+        } finally { checking = false; }
       }, 4000);
     }
 
