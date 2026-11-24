@@ -156,8 +156,8 @@ app.get('/download/:jobId/:variant', (req, res) => {
   if (!job || job.status !== 'done') return res.status(404).json({ error: 'Not ready' });
   const result = job._results?.[variant];
   if (!result || !fs.existsSync(result.outputPath)) return res.status(404).json({ error: 'Variant not found' });
-  const agentSlug = (job.agentName || 'myhome').replace(/\s+/g, '-');
-  res.download(result.outputPath, `myhome-${variant}-${agentSlug}.mp4`);
+  const agentSlug = (job.agentName || 'mydomi').replace(/\s+/g, '-');
+  res.download(result.outputPath, `mydomi-${variant}-${agentSlug}.mp4`);
 });
 
 app.get('/thumb/:jobId/:variant', (req, res) => {
