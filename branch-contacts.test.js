@@ -25,6 +25,13 @@ test('accepts the classic form without changing the published display details', 
   ]);
 });
 
+test('accepts adjacent phone and email elements without whitespace', async () => {
+  const minified = '<main><article id="high-street"><h2>High Street</h2><a href="tel:01632960123">01632 960123</a><a href="mailto:highstreet@example.com">highstreet@example.com</a></article></main>';
+  assert.deepEqual(await verifyBranchContacts(example, [branch], async () => minified), [
+    { name: branch.name, phone: branch.phone, email: branch.email }
+  ]);
+});
+
 test('rejects a phone or email copied from a different branch', async () => {
   for (const change of [{ phone: '01632 960124' }, { email: 'market@example.com' }]) {
     await assert.rejects(verifyBranchContacts(example, [{ ...branch, ...change, source: example + '/contact' }], fetchPage), /couldn’t verify/);

@@ -76,11 +76,16 @@ function normalize(value) {
   return value.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+function visibleCopy(node) {
+  if (node.type === 'text') return node.data;
+  return (node.children || []).map(visibleCopy).join(' ');
+}
+
 function publishedContacts(html, anchor, branch) {
   const $ = load(html);
   $('script,style,template,noscript,[hidden],[aria-hidden="true"]').remove();
   const section = anchor ? $('[id]').filter((_, e) => $(e).attr('id') === anchor).first() : $('main').first().length ? $('main').first() : $('body');
-  if (!section.length || !normalize(section.text()).includes(normalize(branch.name))) return false;
+  if (!section.length || !normalize(visibleCopy(section[0])).includes(normalize(branch.name))) return false;
   // Prefer a branch-sized block. This avoids mixing a branch heading with an
   // unrelated phone or email from a different office or from site navigation.
   const blocks = section.find('article,section,li,address,div,td').toArray().concat(section.toArray());
@@ -88,7 +93,7 @@ function publishedContacts(html, anchor, branch) {
   const phone = normalPhone(branch.phone);
   return blocks.some(node => {
     const block = $(node);
-    const copy = normalize(block.text());
+    const copy = normalize(visibleCopy(node));
     if (!copy.includes(normalize(branch.name))) return false;
     const phones = block.find('a[href^="tel:"]').toArray().map(a => $(a).attr('href').slice(4));
     phones.push(...Array.from(copy.matchAll(/(?:\+44\s*\(0\)|\+44|0044|0)[\s().-]*(?:\d[\s().-]*){9,11}/g), match => match[0]));
